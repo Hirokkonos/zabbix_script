@@ -1,10 +1,10 @@
 本文内における入力パラメータ
 
-2.3(1)③アイテムのキー
+2.3 (1)③アイテムのキー
 log[/var/log/httpd/access_log,"POST /wp-login.php",us-ascii,,skip,]
 
-2.4(1)③のトリガー設定情報
+2.4 (1)③のトリガー設定情報
 ({TRIGGER.VALUE}=0 and {LogMonitoring:log[/var/log/httpd/access_log,"POST /wp-login.php",us-ascii,,skip,].count(60)}>=5) or ({TRIGGER.VALUE}=1 and {LogMonitoring:log[/var/log/httpd/access_log,"POST /wp-login.php",us-ascii,,skip,].count(60)}>5)
 
 3.1 (1)のコマンド
-/bin/aws cloudwatch get-metric-statistics --namespace AWS/EC2 --metric-name CPUUtilization --start-time `date --iso-8601=seconds --date "1 minute ago"` --end-time `date --iso-8601=seconds` --period 60 --statistics Average --dimensions Name=InstanceId,Value=i-XXXXXXXXXXXXXXXXX |jq -r '.Datapoints[].Average'
+/bin/aws cloudwatch get-metric-statistics --namespace AWS/EC2 --metric-name CPUUtilization --start-time `date --iso-8601=seconds --date "1 minute ago"` --end-time `date --iso-8601=seconds` --period 300 --statistics Average --dimensions Name=InstanceId,Value=i-XXXXXXXXXXXXXXXXX |jq -r '.Datapoints[].Average'
