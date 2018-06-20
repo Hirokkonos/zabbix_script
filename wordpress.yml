@@ -1,0 +1,207 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Parameters:
+  DBName:
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
+    ConstraintDescription: must begin with a letter and contain only alphanumeric characters.
+    Description: WordPress database name
+    MaxLength: '64'
+    MinLength: '1'
+    Type: String
+    Default: wordpress
+  DBPassword:
+    AllowedPattern: '[a-zA-Z0-9]*'
+    ConstraintDescription: must contain only alphanumeric characters.
+    Description: WordPress database password
+    MaxLength: '30'
+    MinLength: '2'
+    NoEcho: 'true'
+    Type: String
+  DBUser:
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
+    ConstraintDescription: must begin with a letter and contain only alphanumeric characters.
+    Description: WordPress database admin account
+    Default: root
+    Type: String
+  KeyName:
+    ConstraintDescription: must be the name of an existing EC2 KeyPair.
+    Description: Name of an existing EC2 KeyPair to enable SSH access to the instances
+    Type: AWS::EC2::KeyPair::KeyName
+Mappings:
+  RegionMap:
+    us-east-1:
+      "AMALINUX" : "ami-1853ac65"
+    us-east-2:
+      "AMALINUX" : "ami-25615740"
+    us-west-1:
+      "AMALINUX" : "ami-bf5540df"
+    us-west-2:
+      "AMALINUX" : "ami-d874e0a0"
+    ap-south-1:
+      "AMALINUX" : "ami-7c87d913"
+    ca-central-1:
+      "AMALINUX" : "ami-5b55d23f"
+    eu-west-1:
+      "AMALINUX" : "ami-3bfab942"
+    eu-central-1:
+      "AMALINUX" : "ami-ac442ac3"
+    eu-west-2:
+      "AMALINUX" : "ami-dff017b8"
+    eu-west-3:
+      "AMALINUX" : "ami-4f55e332"
+    ap-southeast-1:
+      "AMALINUX" : "ami-e2adf99e"
+    ap-southeast-2:
+      "AMALINUX" : "ami-43874721"
+    ap-northeast-2:
+      "AMALINUX" : "ami-5e1ab730"
+    ap-northeast-1:
+      "AMALINUX" : "ami-a77c30c1"
+    sa-east-1:
+      "AMALINUX" : "ami-5339733f"
+Resources:
+  WebServer:
+    Type: AWS::EC2::Instance
+    Metadata:
+      AWS::CloudFormation::Init:
+        configSets:
+          wordpress_install:
+          - install_cfn
+          - install_wordpress
+          - configure_wordpress
+        configure_wordpress:
+          commands:
+            01_set_mysql_root_password:
+              command: !Sub |
+                mysqladmin -u root password '${DBPassword}'
+              test: !Sub |
+                $(mysql ${DBName} -u root --password='${DBPassword}' >/dev/null 2>&1 </dev/null); (( $? != 0 ))
+            02_create_database:
+              command: !Sub |
+                mysql -u root --password='${DBPassword}' < /tmp/setup.mysql
+              test: !Sub |
+                $(mysql ${DBName} -u root --password='${DBPassword}' >/dev/null 2>&1 </dev/null); (( $? !=0))
+            03_config_wordpress:
+              command: !Sub |
+                cp /var/www/html/wordpress/wp-config-sample.php /var/www/html/wordpress/wp-config.php
+                sed -i "s/'database_name_here'/${DBName}/g" wp-config.php
+                sed -i "s/'username_here'/${DBUser}/g" wp-config.php
+                sed -i "s/'password_here'/'${DBPassword}'/g" wp-config.php
+              cwd: "/var/www/html/wordpress"
+            04_wp_move:
+              command:
+                !Sub |
+                chown apache:apache /var/www/html/wordpress
+                mv /var/www/html/wordpress/* /var/www/html/
+            05_install_zabbix_agent_and_etc:
+              command:
+                !Sub |
+                rpm -ivh http://repo.zabbix.com/zabbix/3.0/rhel/6/x86_64/zabbix-release-3.0-1.el6.noarch.rpm
+                yum -y install zabbix-agent
+                mv /etc/localtime /etc/localtime.org
+                cp -p /usr/share/zoneinfo/Japan /etc/localtime
+        install_cfn:
+          files:
+            /etc/cfn/cfn-hup.conf:
+              content: !Sub |
+                [main]
+                stack= ${AWS::StackId}
+                region=${AWS::Region}
+              group: root
+              mode: '000400'
+              owner: root
+            /etc/cfn/hooks.d/cfn-auto-reloader.conf:
+              content: !Sub |
+                [cfn-auto-reloader-hook]
+                triggers=post.update
+                path=Resources.WebServer.Metadata.AWS::CloudFormation::Init
+                action=/opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource WebServer --configsets wordpress_install --url https://stackbuilder.amazonaws.com
+              group: root
+              mode: '000400'
+              owner: root
+          services:
+            sysvinit:
+              cfn-hup:
+                enabled: true
+                ensureRunning: true
+                files:
+                - /etc/cfn/cfn-hup.conf
+                - /etc/cfn/hooks.d/cfn-auto-reloader.conf
+        install_wordpress:
+          files:
+            /tmp/setup.mysql:
+              content: !Sub |
+                CREATE DATABASE ${DBName};
+                GRANT ALL PRIVILEGES ON ${DBName}.* TO ${DBUser}@localhost IDENTIFIED BY '${DBPassword}'; 
+                FLUSH PRIVILEGES;
+              group: root
+              mode: '000400'
+              owner: root
+          packages:
+            yum:
+              httpd: []
+              mysql: []
+              mysql-devel: []
+              mysql-libs: []
+              mysql-server: []
+              php: []
+              php-mysql: []
+          sources:
+            /var/www/html: "https://ja.wordpress.org/latest-ja.tar.gz"
+          services:
+            sysvinit:
+              httpd:
+                enabled: true
+                ensureRunning: true
+              mysqld:
+                enabled: true
+                ensureRunning: true
+    Properties:
+      ImageId: !FindInMap [RegionMap, !Ref "AWS::Region", AMALINUX]
+      InstanceType: t2.micro
+      Tags:
+        - Key: Name
+          Value: WebServer
+      KeyName:
+        Ref: KeyName
+      SecurityGroups:
+      - Ref: WebServerSecurityGroup
+      UserData:
+        Fn::Base64: !Sub |
+           #!/bin/bash -xe
+           yum -y update
+           yum update -y aws-cfn-bootstrap
+           /opt/aws/bin/cfn-init -v --stack ${AWS::StackId} --resource WebServer --configsets wordpress_install --region ${AWS::Region}
+           /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackId} --resource WebServer --region ${AWS::Region}
+  WebServerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: "Enable HTTP/SSH/Zabbix AccessPort"
+      SecurityGroupIngress:
+      - CidrIp: 0.0.0.0/0
+        FromPort: '80'
+        IpProtocol: tcp
+        ToPort: '80'
+      - CidrIp: 0.0.0.0/0
+        FromPort: '22'
+        IpProtocol: tcp
+        ToPort: '22'
+      -
+        IpProtocol: "tcp"
+        FromPort: "10050"
+        ToPort: "10050"
+        CidrIp: "0.0.0.0/0"
+      -
+        IpProtocol: "tcp"
+        FromPort: "10051"
+        ToPort: "10051"
+        CidrIp: "0.0.0.0/0"
+Outputs:
+  WebsiteURL:
+    Value:
+      Fn::Join:
+      - ''
+      - - http://
+        - Fn::GetAtt:
+          - WebServer
+          - PublicDnsName
+    Description: WordPress Website
